@@ -1,12 +1,17 @@
+import uuid
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from src.agent import TutorSession
 from src.generator import generate
 from src.models import Question, QuestionType, RubricScore
 from src.retriever import retrieve
 from src.scorer import score
 
 app = FastAPI(title="LSAT Tutor API")
+
+_sessions: dict[str, TutorSession] = {}
 
 
 @app.get("/health")
@@ -50,4 +55,37 @@ def score_question(question: Question) -> RubricScore:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# TODO: Phase 3 — POST /session, POST /session/{id}/answer, GET /session/{id}/hint
+# ---------------------------------------------------------------------------
+# Phase 3 — session endpoints
+# ---------------------------------------------------------------------------
+
+class SessionResponse(BaseModel):
+    session_id: str
+    message: str
+
+
+class MessageRequest(BaseModel):
+    message: str
+
+
+@app.post("/session", response_model=SessionResponse)
+def create_session() -> SessionResponse:
+    """Create a new tutoring session. Returns session_id and the opening message."""
+    session_id = str(uuid.uuid4())
+    session = TutorSession()
+    opening = session.run_turn("Let's start a session. Please greet me briefly and give me my first question.")
+    _sessions[session_id] = session
+    return SessionResponse(session_id=session_id, message=opening)
+
+
+@app.post("/session/{session_id}/message", response_model=SessionResponse)
+def send_message(session_id: str, req: MessageRequest) -> SessionResponse:
+    """Send a user message to an active session and get the agent's response."""
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        reply = session.run_turn(req.message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return SessionResponse(session_id=session_id, message=reply)

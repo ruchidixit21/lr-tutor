@@ -72,3 +72,29 @@
 - `max_tokens=1024` too low for generation — raised to 2048
 
 **Next:** Phase 3 — agentic tutor loop (WeaknessTracker, tool handlers, agent system prompt, LangSmith tracing).
+
+---
+
+## 2026-06-21 — Session 6: Phase 3 agentic tutor loop
+
+**Built:**
+- `src/weakness.py` — WeaknessTracker with exponential recency decay (decay=0.85, 2x boost for last 10 attempts). `select_type()` samples by weakness weight (1 - score), floored at 0.05 so all types stay reachable. `get_weakest_types(n=3)` for reporting.
+- `prompts/agent_system_prompt.txt` — Socratic tutor system prompt (user-authored + approved). Covers: Socratic method, 2-attempt rule, 3-level hint progression, 4 wrong-answer pattern diagnostics, tone guidelines, session flow, tool use rules, hard constraints.
+- `src/agent.py` — TutorSession class with tool dispatch and Claude tool-use loop:
+  - Tool handlers: `get_next_question` (calls `generate()`, sets `current_question`), `submit_answer` (checks answer, records to WeaknessTracker), `get_hint` (calls claude-sonnet-4-6 with separate hint system prompt, calibrated by attempt_number 1–3), `get_weakness_report` (returns WeaknessModel + weakest 3 types)
+  - `run_turn()` drives the tool-use loop: appends user message → calls Claude → executes tool calls → feeds results back → repeats until `end_turn`
+  - Separate `_HINT_SYSTEM` prompt: Hint 1 indirect/guiding question, Hint 2 direct/structural, Hint 3 reveal + full explanation
+- `src/api.py` — added Phase 3 session endpoints:
+  - `POST /session` — creates TutorSession, sends opening message, returns `session_id`
+  - `POST /session/{id}/message` — routes user message through `run_turn()`, returns agent reply
+  - In-memory `_sessions` dict (sufficient for demo; replace with persistent store for production)
+- `tests/test_agent.py` — 7 offline unit tests for tool dispatch logic (all mocked, no API calls, fast)
+
+**Architectural decisions:**
+- Hint generation uses a separate Claude call with a dedicated `_HINT_SYSTEM` prompt rather than letting the main agent call a tool. This ensures hint quality is controlled independently of the agent's conversational reasoning — the agent calls `get_hint`, which itself calls Claude. The tradeoff is an extra API call per hint, which is acceptable.
+- Sessions are held in-memory (dict on the FastAPI process). This is fine for a demo with one user. For a multi-user deployment, sessions would need a persistent store (Redis/DB) keyed by session_id.
+- LangSmith `@traceable` decorator is wired in but requires LANGSMITH_API_KEY to activate. Tests run without it.
+
+**All 11 tests passing** (test_agent.py × 7, test_models.py × 4).
+
+**Next:** Phase 4 — gated generator (generate 5, score, return best) + novelty metric + scatter plot.
