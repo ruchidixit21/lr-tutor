@@ -1,0 +1,72 @@
+[
+  {
+    "id": "rc-01",
+    "query": "weaken a causal argument linking diet to health outcomes",
+    "expected_types": ["weaken"],
+    "min_relevant": 2,
+    "notes": "Classic weaken pattern: alternative cause or correlation/causation gap"
+  },
+  {
+    "id": "rc-02",
+    "query": "identify the unstated premise an argument depends on",
+    "expected_types": ["assumption_necessary"],
+    "min_relevant": 2,
+    "notes": "Assumption questions: argument requires an unstated bridge"
+  },
+  {
+    "id": "rc-03",
+    "query": "strengthen an argument about environmental policy effectiveness",
+    "expected_types": ["strengthen"],
+    "min_relevant": 2,
+    "notes": "Strengthen: add support without resolving all doubt"
+  },
+  {
+    "id": "rc-04",
+    "query": "the reasoning is circular or the conclusion is assumed in the premises",
+    "expected_types": ["flaw"],
+    "min_relevant": 2,
+    "notes": "Flaw questions: common flaws include circularity, ad hominem, false dichotomy"
+  },
+  {
+    "id": "rc-05",
+    "query": "draw a conclusion that follows from two or more given statements",
+    "expected_types": ["inference", "must_be_true"],
+    "min_relevant": 2,
+    "notes": "Inference / must-be-true are closely related — either type is relevant"
+  },
+  {
+    "id": "rc-06",
+    "query": "explain an apparent paradox or surprising discrepancy in survey results",
+    "expected_types": ["paradox"],
+    "min_relevant": 2,
+    "notes": "Paradox: two facts that seem contradictory, need reconciliation"
+  },
+  {
+    "id": "rc-07",
+    "query": "find an argument with the same logical structure involving crime statistics",
+    "expected_types": ["parallel_reasoning"],
+    "min_relevant": 2,
+    "notes": "Parallel reasoning: match structure, not topic"
+  },
+  {
+    "id": "rc-08",
+    "query": "determine what additional information would help evaluate a medical study argument",
+    "expected_types": ["evaluate"],
+    "min_relevant": 2,
+    "notes": "Evaluate: asking which fact would matter — could strengthen or weaken"
+  },
+  {
+    "id": "rc-09",
+    "query": "identify a general principle illustrated by a specific case about fairness",
+    "expected_types": ["principle_identify"],
+    "min_relevant": 2,
+    "notes": "Principle identify: abstract a rule from a concrete example"
+  },
+  {
+    "id": "rc-10",
+    "query": "two speakers disagree about whether a government regulation is justified",
+    "expected_types": ["point_of_disagreement"],
+    "min_relevant": 2,
+    "notes": "Point of disagreement: both speakers must directly address the same claim"
+  }
+]
