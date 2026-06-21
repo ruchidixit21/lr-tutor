@@ -8,6 +8,7 @@ chroma_db/
 .pytest_cache/
 dist/
 *.egg-info/
+data/
 .lawhub_auth.json
 node_modules/
 frontend/dist/

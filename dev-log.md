@@ -48,3 +48,27 @@
 - `source_detail` format: `"PrepTest 140 Section N QM"` for traceability back to source
 
 **Next:** Phase 2 — implement generator, scorer, and generate ~5 fill-in questions for the 6 weak types.
+
+---
+
+## 2026-06-20 to 2026-06-21 — Session 5: Phase 2 generation + scoring
+
+**Built:**
+- `src/generator.py` — RAG-grounded single-candidate generation. Retrieves k=3 real LSAT examples of the target type, pairs them with per-type structural instructions (15 detailed instruction strings), prompts claude-sonnet-4-6 to generate a novel question. Forces `question_type` to the correct enum value post-parse to handle Claude's occasional uppercase/spaced output.
+- `src/scorer.py` — five-dimension rubric scorer (logical_validity, answer_uniqueness, distractor_quality, type_accuracy, stimulus_independence, each 1–5). System prompt calibrated so real LSAT questions should average ≥4.0.
+- `src/api.py` — added `POST /generate` and `POST /score` endpoints.
+- `scripts/run_eval.py` — batch scorer with per-dimension summary table.
+- `scripts/generate_fillin.py` — fills corpus gaps by type, rejects questions below configurable score threshold (default 3.5). Retries up to `attempts × needed` times per type.
+
+**Corpus completion:**
+- Generated 19 fill-in questions across 6 weak types in two runs
+- Generated question scores: avg 4.2–4.8 across saved questions (all above 3.5 threshold)
+- Final corpus: 120 questions (101 real LSAT + 19 generated), all 15 types with ≥5 examples
+- Loaded into Chroma: 120 documents
+
+**Issues fixed:**
+- Claude outputting `"CANNOT BE TRUE"` / `"EVALUATE"` instead of snake_case enum values — fixed by (1) adding explicit enum value to prompt and (2) overriding `question_type` in parsed JSON before Pydantic validation
+- Occasional empty scorer responses — intermittent API issue, handled by existing retry logic in generate_fillin.py
+- `max_tokens=1024` too low for generation — raised to 2048
+
+**Next:** Phase 3 — agentic tutor loop (WeaknessTracker, tool handlers, agent system prompt, LangSmith tracing).
