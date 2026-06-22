@@ -1,6 +1,9 @@
 import uuid
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+
+load_dotenv()
 from pydantic import BaseModel
 
 from src.agent import TutorSession
