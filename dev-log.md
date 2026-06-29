@@ -98,3 +98,25 @@
 **All 11 tests passing** (test_agent.py × 7, test_models.py × 4).
 
 **Next:** Phase 4 — gated generator (generate 5, score, return best) + novelty metric + scatter plot.
+
+---
+
+## 2026-06-22 — Session 7: Phase 4 gated generator + novelty metric
+
+**Built:**
+- `src/generator_gated.py` — `generate_gated(question_type, candidates=5, quality_floor=3.5, max_retries=2)`: generates N candidates sequentially, scores each with the rubric scorer, returns `(Question, RubricScore)` for the highest-scoring one. If best average is below `quality_floor`, retries the full slate up to `max_retries` times. Returns the best seen across all attempts regardless — only raises `RuntimeError` if every API call fails outright.
+- `scripts/compute_novelty.py` — fetches all embeddings directly from Chroma (no re-embedding), splits by source (`real_lsat` vs `generated`), computes cosine distance from each generated question to its nearest real LSAT neighbor, loads rubric averages from a scored JSONL file, prints summary stats, and saves a scatter plot (x=novelty, y=rubric avg) with valid+novel zone highlighted. Valid+novel thresholds: rubric ≥ 3.5, novelty ≥ 0.25.
+- Added `matplotlib` and `numpy` to dependencies via `uv add`.
+- `tests/test_generator_gated.py` — 4 unit tests (all mocked): best-selection, retry-on-low-score, early-exit-on-floor-met, raise-on-total-failure.
+
+**All 4 tests passing.**
+
+**Validation result:** 30/30 gated-generated questions (100%) landed in the valid+novel zone (rubric ≥3.5, novelty ≥0.25). Phase 4 criterion was ≥70% — well exceeded.
+
+**Issues fixed along the way:**
+- Scorer intermittently returned prose analysis instead of JSON (despite system prompt). Fix: extract JSON object by finding first `{` and last `}` in response, regardless of surrounding text.
+- Assistant prefill (`{"role": "assistant", "content": "{"}`) was attempted but `claude-sonnet-4-6` rejects it with 400. Reverted to JSON extraction approach.
+- One generator candidate produced truncated JSON (same root cause); applied the same extraction fix to `generator.py`.
+- Scorer retry logic added: exponential backoff (2s, 4s) between retries, max 3 attempts.
+
+**Next:** Phase 5 — React frontend, SSE streaming hints, WeaknessHeatmap, human eval UI.

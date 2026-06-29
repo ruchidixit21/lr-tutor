@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import anthropic
 
@@ -50,29 +51,44 @@ Output ONLY valid JSON — no markdown fences, no commentary:
 }"""
 
 
-def score(question: Question) -> RubricScore:
+def score(question: Question, max_retries: int = 3) -> RubricScore:
     """Score a Question on the five rubric dimensions using claude-sonnet-4-6.
 
     The system prompt defines each 1–5 dimension in detail and is calibrated so that
     real LSAT questions should average ≥4.0. Returns a RubricScore with an `.average`
     property. Used both for ceiling calibration (real questions) and to evaluate
     generated questions against the baseline.
+
+    Retries up to max_retries times on empty or unparseable responses, which occur
+    intermittently due to transient API issues.
     """
     question_text = json.dumps(question.model_dump(), indent=2)
+    messages = [{"role": "user", "content": f"Score this LSAT question:\n\n{question_text}"}]
 
-    response = _get_client().messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": f"Score this LSAT question:\n\n{question_text}",
-            }
-        ],
-    )
+    last_error: Exception | None = None
+    for i in range(max_retries):
+        if i > 0:
+            time.sleep(2 ** i)  # 2s, 4s backoff
+        response = _get_client().messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        raw = response.content[0].text if response.content else ""
+        # Extract the JSON object — Claude sometimes wraps it in prose or markdown
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start != -1 and end > start:
+            raw = raw[start : end + 1]
+        else:
+            last_error = ValueError(f"No JSON object found in response: {repr(raw[:200])}")
+            continue
+        try:
+            data = json.loads(raw)
+            data["question_id"] = question.id
+            return RubricScore.model_validate(data)
+        except Exception as e:
+            last_error = Exception(f"{e} | raw={repr(raw[:200])}")
 
-    raw = response.content[0].text.strip()
-    data = json.loads(raw)
-    data["question_id"] = question.id
-    return RubricScore.model_validate(data)
+    raise RuntimeError(f"Scorer failed after {max_retries} attempts: {last_error}")
