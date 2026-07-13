@@ -1,18 +1,31 @@
+import json
 import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 load_dotenv()
 from pydantic import BaseModel
 
-from src.agent import TutorSession
+from src.agent import HINT_SYSTEM, TutorSession, build_hint_prompt
 from src.generator import generate
 from src.models import Question, QuestionType, RubricScore
 from src.retriever import retrieve
 from src.scorer import score
 
+_HUMAN_SCORES_PATH = Path("eval/human_scores.jsonl")
+
 app = FastAPI(title="LSAT Tutor API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _sessions: dict[str, TutorSession] = {}
 
@@ -62,13 +75,49 @@ def score_question(question: Question) -> RubricScore:
 # Phase 3 — session endpoints
 # ---------------------------------------------------------------------------
 
+class ChoiceData(BaseModel):
+    label: str
+    text: str
+
+
+class QuestionData(BaseModel):
+    question_id: str
+    question_type: str
+    stimulus: str
+    stem: str
+    choices: list[ChoiceData]
+
+
 class SessionResponse(BaseModel):
     session_id: str
     message: str
+    question: QuestionData | None = None
+    weakness_scores: dict[str, float] | None = None
 
 
 class MessageRequest(BaseModel):
     message: str
+
+
+def _build_response(session_id: str, session: TutorSession, message: str) -> SessionResponse:
+    """Attach current question and weakness scores to every session response."""
+    question = None
+    if session.current_question:
+        q = session.current_question
+        question = QuestionData(
+            question_id=q.id,
+            question_type=q.question_type.value,
+            stimulus=q.stimulus,
+            stem=q.stem,
+            choices=[ChoiceData(label=c.label, text=c.text) for c in q.choices],
+        )
+    weakness = session.weakness.to_model()
+    return SessionResponse(
+        session_id=session_id,
+        message=message,
+        question=question,
+        weakness_scores=weakness.scores,
+    )
 
 
 @app.post("/session", response_model=SessionResponse)
@@ -78,7 +127,7 @@ def create_session() -> SessionResponse:
     session = TutorSession()
     opening = session.run_turn("Let's start a session. Please greet me briefly and give me my first question.")
     _sessions[session_id] = session
-    return SessionResponse(session_id=session_id, message=opening)
+    return _build_response(session_id, session, opening)
 
 
 @app.post("/session/{session_id}/message", response_model=SessionResponse)
@@ -91,4 +140,62 @@ def send_message(session_id: str, req: MessageRequest) -> SessionResponse:
         reply = session.run_turn(req.message)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return SessionResponse(session_id=session_id, message=reply)
+    return _build_response(session_id, session, reply)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — SSE hint streaming + human eval
+# ---------------------------------------------------------------------------
+
+@app.get("/session/{session_id}/hint-stream")
+def hint_stream(
+    session_id: str,
+    question_id: str = Query(),
+    attempt_number: int = Query(ge=1, le=3),
+) -> StreamingResponse:
+    """Stream a Socratic hint token-by-token via SSE."""
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.current_question is None or session.current_question.id != question_id:
+        raise HTTPException(status_code=400, detail="Question ID does not match active question")
+
+    question = session.current_question
+
+    import anthropic as _anthropic
+
+    def event_stream():
+        client = _anthropic.Anthropic()
+        with client.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=HINT_SYSTEM,
+            messages=[{
+                "role": "user",
+                "content": build_hint_prompt(question, attempt_number),
+            }],
+        ) as stream:
+            for text in stream.text_stream:
+                yield f"data: {text}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+class HumanScoreRequest(BaseModel):
+    question_id: str
+    logical_validity: int
+    answer_uniqueness: int
+    distractor_quality: int
+    type_accuracy: int
+    stimulus_independence: int
+    notes: str = ""
+
+
+@app.post("/human-score")
+def submit_human_score(req: HumanScoreRequest) -> dict:
+    """Append a human rubric rating to eval/human_scores.jsonl."""
+    _HUMAN_SCORES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _HUMAN_SCORES_PATH.open("a") as f:
+        f.write(json.dumps(req.model_dump()) + "\n")
+    return {"status": "saved"}

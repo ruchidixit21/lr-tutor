@@ -38,7 +38,7 @@ def _get_client() -> anthropic.Anthropic:
 # Hint generation
 # ---------------------------------------------------------------------------
 
-_HINT_SYSTEM = """You are generating a Socratic hint for an LSAT Logical Reasoning question.
+HINT_SYSTEM = """You are generating a Socratic hint for an LSAT Logical Reasoning question.
 You know the correct answer but must NOT reveal it directly.
 
 Hint 1 (attempt_number=1): Indirect. Ask a guiding question about what the question type
@@ -53,8 +53,8 @@ is right, then briefly note why each wrong answer fails.
 Respond with the hint text only — no preamble."""
 
 
-def _generate_hint(question: Question, attempt_number: int) -> str:
-    """Call claude-sonnet-4-6 to produce a Socratic hint calibrated to attempt_number."""
+def build_hint_prompt(question: Question, attempt_number: int) -> str:
+    """Build the user message for a hint request (used by both sync and streaming callers)."""
     q_summary = (
         f"Question type: {question.question_type.value}\n"
         f"Stimulus: {question.stimulus}\n"
@@ -63,16 +63,16 @@ def _generate_hint(question: Question, attempt_number: int) -> str:
         + "\n".join(f"  {c.label}. {c.text}" for c in question.choices)
         + f"\nCorrect answer: {question.correct_answer}"
     )
+    return f"{q_summary}\n\nGenerate hint for attempt_number={attempt_number}."
+
+
+def _generate_hint(question: Question, attempt_number: int) -> str:
+    """Call claude-sonnet-4-6 to produce a Socratic hint calibrated to attempt_number."""
     response = _get_client().messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=_HINT_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": f"{q_summary}\n\nGenerate hint for attempt_number={attempt_number}.",
-            }
-        ],
+        system=HINT_SYSTEM,
+        messages=[{"role": "user", "content": build_hint_prompt(question, attempt_number)}],
     )
     return response.content[0].text.strip()
 
