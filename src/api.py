@@ -160,6 +160,7 @@ def next_question(session_id: str) -> SessionResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     session.current_question = question
+    session.messages = []  # fresh history so the agent isn't confused by the previous question
     return _build_response(session_id, session, "")
 
 

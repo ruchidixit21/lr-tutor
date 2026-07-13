@@ -63,15 +63,21 @@ export default function App() {
       // Wrong: NOW call the LLM for Socratic feedback
       setLoading(true);
       try {
-        const res = await sendMessage(
-          sessionId,
-          `My answer is ${selectedAnswer}`
-        );
+        const questionContext = [
+          `Question type: ${currentQuestion.question_type}`,
+          `Stimulus: ${currentQuestion.stimulus}`,
+          `Stem: ${currentQuestion.stem}`,
+          currentQuestion.choices.map((c) => `${c.label}. ${c.text}`).join("\n"),
+          `My answer is ${selectedAnswer}.`,
+        ].join("\n\n");
+        const res = await sendMessage(sessionId, questionContext);
         setAgentMessage(res.message);
         if (res.weakness_scores) setWeaknessScores(res.weakness_scores);
         if (res.question && res.question.question_id !== currentQuestion.question_id) {
           loadQuestion(res.question);
         }
+        // Re-enable answer selection so the student can try again
+        setSubmitted(false);
       } finally {
         setLoading(false);
       }
@@ -113,7 +119,7 @@ export default function App() {
         {/* Agent message — shown when there's no active question (greeting, session end)
             or after the student has submitted (feedback). Hidden while a fresh question
             is waiting for a first attempt, since the Question component already shows it. */}
-        {agentMessage && (!currentQuestion || submitted) && (
+        {agentMessage && (!currentQuestion || submitted || attempts > 0) && (
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             {loading ? (
               <p className="text-sm text-gray-400 animate-pulse">Thinking…</p>
@@ -143,12 +149,12 @@ export default function App() {
               submitted={submitted}
               onSubmit={handleSubmit}
             />
-            {submitted && sessionId && (
+            {attempts > 0 && sessionId && (
               <HintPanel
                 sessionId={sessionId}
                 questionId={currentQuestion.question_id}
                 attemptNumber={Math.min(attempts, 3)}
-                disabled={!submitted}
+                disabled={false}
               />
             )}
             {questionResolved && !evalSubmitted && (
