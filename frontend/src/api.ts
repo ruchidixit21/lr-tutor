@@ -63,6 +63,33 @@ export function streamHint(
   return () => es.close();
 }
 
+export async function nextQuestion(sessionId: string): Promise<SessionResponse> {
+  const res = await fetch(`${BASE}/session/${sessionId}/next-question`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`nextQuestion failed: ${res.status}`);
+  return res.json();
+}
+
+export interface SubmitAnswerResponse {
+  correct: boolean;
+  explanation: string | null;
+  weakness_scores: Record<string, number>;
+}
+
+export async function submitAnswer(
+  sessionId: string,
+  answer: string
+): Promise<SubmitAnswerResponse> {
+  const res = await fetch(`${BASE}/session/${sessionId}/submit-answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer }),
+  });
+  if (!res.ok) throw new Error(`submitAnswer failed: ${res.status}`);
+  return res.json();
+}
+
 export async function submitHumanScore(payload: {
   question_id: string;
   logical_validity: number;

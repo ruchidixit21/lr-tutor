@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { QuestionData, createSession, sendMessage } from "./api";
+import { QuestionData, createSession, nextQuestion, sendMessage, submitAnswer } from "./api";
 import AnswerSelector from "./components/AnswerSelector";
 import HintPanel from "./components/HintPanel";
 import HumanEvalPanel from "./components/HumanEvalPanel";
@@ -41,23 +41,40 @@ export default function App() {
     setEvalSubmitted(false);
   }
 
-  async function submitAnswer() {
+  async function handleSubmit() {
     if (!sessionId || !selectedAnswer || !currentQuestion) return;
     setSubmitted(true);
-    setAttempts((a) => a + 1);
-    setLoading(true);
-    try {
-      const res = await sendMessage(sessionId, `My answer is ${selectedAnswer}`);
-      setAgentMessage(res.message);
-      if (res.question && res.question.question_id !== currentQuestion.question_id) {
-        loadQuestion(res.question);
+    const newAttempts = attempts + 1;
+    setAttempts(newAttempts);
+
+    // Step 1: instant deterministic check — no LLM
+    const check = await submitAnswer(sessionId, selectedAnswer);
+    setWeaknessScores(check.weakness_scores);
+
+    if (check.correct) {
+      // Correct: show feedback immediately, no LLM needed
+      setAgentMessage(
+        check.explanation
+          ? `Correct. ${check.explanation}`
+          : "Correct!"
+      );
+      setQuestionResolved(true);
+    } else {
+      // Wrong: NOW call the LLM for Socratic feedback
+      setLoading(true);
+      try {
+        const res = await sendMessage(
+          sessionId,
+          `My answer is ${selectedAnswer}`
+        );
+        setAgentMessage(res.message);
+        if (res.weakness_scores) setWeaknessScores(res.weakness_scores);
+        if (res.question && res.question.question_id !== currentQuestion.question_id) {
+          loadQuestion(res.question);
+        }
+      } finally {
+        setLoading(false);
       }
-      if (res.weakness_scores) setWeaknessScores(res.weakness_scores);
-      if (/correct|well done|that'?s right|the answer is/i.test(res.message)) {
-        setQuestionResolved(true);
-      }
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -124,7 +141,7 @@ export default function App() {
             <AnswerSelector
               selectedAnswer={selectedAnswer}
               submitted={submitted}
-              onSubmit={submitAnswer}
+              onSubmit={handleSubmit}
             />
             {submitted && sessionId && (
               <HintPanel
@@ -139,6 +156,25 @@ export default function App() {
                 questionId={currentQuestion.question_id}
                 onSubmitted={() => setEvalSubmitted(true)}
               />
+            )}
+            {questionResolved && evalSubmitted && (
+              <button
+                onClick={async () => {
+                  setLoading(true);
+                  try {
+                    const res = await nextQuestion(sessionId);
+                    setAgentMessage("");
+                    if (res.question) loadQuestion(res.question);
+                    if (res.weakness_scores) setWeaknessScores(res.weakness_scores);
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="mt-2 px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+              >
+                Next question →
+              </button>
             )}
           </div>
         )}

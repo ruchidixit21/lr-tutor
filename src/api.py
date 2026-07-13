@@ -143,6 +143,56 @@ def send_message(session_id: str, req: MessageRequest) -> SessionResponse:
     return _build_response(session_id, session, reply)
 
 
+@app.post("/session/{session_id}/next-question", response_model=SessionResponse)
+def next_question(session_id: str) -> SessionResponse:
+    """Generate and return the next question directly — no agent loop.
+
+    Uses the WeaknessTracker to select the question type, then calls generate()
+    to produce a new question. Bypasses the conversational agent entirely because
+    question selection is mechanical, not conversational.
+    """
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    qt = session.weakness.select_type()
+    try:
+        question = generate(qt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    session.current_question = question
+    return _build_response(session_id, session, "")
+
+
+class SubmitAnswerRequest(BaseModel):
+    answer: str
+
+
+class SubmitAnswerResponse(BaseModel):
+    correct: bool
+    explanation: str | None
+    weakness_scores: dict[str, float]
+
+
+@app.post("/session/{session_id}/submit-answer", response_model=SubmitAnswerResponse)
+def submit_answer(session_id: str, req: SubmitAnswerRequest) -> SubmitAnswerResponse:
+    """Deterministic answer check — no LLM call. Records the attempt and returns immediately."""
+    session = _sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.current_question is None:
+        raise HTTPException(status_code=400, detail="No active question")
+    q = session.current_question
+    correct = req.answer.strip().upper() == q.correct_answer.upper()
+    if q.id not in session._recorded_ids:
+        session.weakness.record_attempt(q.question_type, correct)
+        session._recorded_ids.add(q.id)
+    return SubmitAnswerResponse(
+        correct=correct,
+        explanation=q.explanation,
+        weakness_scores=session.weakness.to_model().scores,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Phase 5 — SSE hint streaming + human eval
 # ---------------------------------------------------------------------------

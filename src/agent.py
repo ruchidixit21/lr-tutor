@@ -86,6 +86,9 @@ class TutorSession:
         self.weakness = WeaknessTracker()
         self.current_question: Question | None = None
         self.messages: list[dict] = []
+        # question IDs already recorded by the API's submit-answer endpoint
+        # so the agent's submit_answer tool doesn't double-record
+        self._recorded_ids: set[str] = set()
 
     # ---- tool handlers ----
 
@@ -105,7 +108,9 @@ class TutorSession:
         if self.current_question is None or self.current_question.id != question_id:
             return {"error": "No active question matches that ID."}
         correct = answer.strip().upper() == self.current_question.correct_answer.upper()
-        self.weakness.record_attempt(self.current_question.question_type, correct)
+        if question_id not in self._recorded_ids:
+            self.weakness.record_attempt(self.current_question.question_type, correct)
+            self._recorded_ids.add(question_id)
         return {
             "correct": correct,
             "answer_given": answer,
