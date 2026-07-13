@@ -93,8 +93,10 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex-1 max-w-2xl mx-auto py-8 px-6 space-y-4">
-        {/* Agent message */}
-        {agentMessage && (
+        {/* Agent message — shown when there's no active question (greeting, session end)
+            or after the student has submitted (feedback). Hidden while a fresh question
+            is waiting for a first attempt, since the Question component already shows it. */}
+        {agentMessage && (!currentQuestion || submitted) && (
           <div className="bg-white border border-gray-200 rounded-xl p-5">
             {loading ? (
               <p className="text-sm text-gray-400 animate-pulse">Thinking…</p>
@@ -102,6 +104,9 @@ export default function App() {
               <Markdown text={agentMessage} />
             )}
           </div>
+        )}
+        {loading && currentQuestion && !submitted && (
+          <p className="text-sm text-gray-400 animate-pulse px-1">Thinking…</p>
         )}
 
         {/* Question block */}
