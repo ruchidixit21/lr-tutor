@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -14,12 +15,25 @@ from src.agent import HINT_SYSTEM, TutorSession, build_hint_prompt
 from src.generator import generate
 from src.generator_gated import generate_gated
 from src.models import Question, QuestionType, RubricScore
+from src.question_cache import question_cache
 from src.retriever import retrieve
 from src.scorer import score
 
 _HUMAN_SCORES_PATH = Path("eval/human_scores.jsonl")
 
-app = FastAPI(title="LSAT Tutor API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the background refill loop. Pre-warm runs in a thread so the
+    # server is ready immediately; first requests fall back to generate_gated
+    # (~8s) until the cache fills (~40s total for all 15 types).
+    question_cache.start()
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, question_cache.pre_warm)
+    yield
+
+
+app = FastAPI(title="LSAT Tutor API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,6 +48,12 @@ _sessions: dict[str, TutorSession] = {}
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/cache-status")
+def cache_status() -> dict:
+    """Return current pool depth per question type. Useful for monitoring warm-up."""
+    return {"pool": question_cache.pool_sizes()}
 
 
 @app.get("/retrieve", response_model=list[Question])
@@ -157,8 +177,8 @@ def next_question(session_id: str) -> SessionResponse:
         raise HTTPException(status_code=404, detail="Session not found")
     qt = session.weakness.select_type()
     try:
-        question, winning_score = generate_gated(qt)
-        print(f"[gate] {qt.value} | winner avg={winning_score.average:.2f}")
+        question, winning_score = question_cache.get(qt)
+        print(f"[cache] {qt.value} | avg={winning_score.average:.2f} | pool={question_cache.pool_sizes()[qt.value]}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     session.current_question = question

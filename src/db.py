@@ -1,19 +1,23 @@
 import os
+import threading
 import chromadb
 import chromadb.api
 from chromadb.config import Settings
 
 _client: chromadb.api.ClientAPI | None = None
+_lock = threading.Lock()
 
 
 def get_client() -> chromadb.api.ClientAPI:
     global _client
     if _client is None:
-        persist_dir = os.environ.get("CHROMA_PERSIST_DIR", "./chroma_db")
-        _client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        with _lock:
+            if _client is None:  # double-checked: only one thread initialises
+                persist_dir = os.environ.get("CHROMA_PERSIST_DIR", "./chroma_db")
+                _client = chromadb.PersistentClient(
+                    path=persist_dir,
+                    settings=Settings(anonymized_telemetry=False),
+                )
     return _client
 
 
