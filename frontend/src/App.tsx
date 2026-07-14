@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { QuestionData, createSession, nextQuestion, sendMessage, submitAnswer } from "./api";
+import { QuestionData, createSession, nextQuestion, submitAnswer } from "./api";
 import AnswerSelector from "./components/AnswerSelector";
 import HintPanel from "./components/HintPanel";
 import HumanEvalPanel from "./components/HumanEvalPanel";
@@ -60,27 +60,9 @@ export default function App() {
       );
       setQuestionResolved(true);
     } else {
-      // Wrong: NOW call the LLM for Socratic feedback
-      setLoading(true);
-      try {
-        const questionContext = [
-          `Question type: ${currentQuestion.question_type}`,
-          `Stimulus: ${currentQuestion.stimulus}`,
-          `Stem: ${currentQuestion.stem}`,
-          currentQuestion.choices.map((c) => `${c.label}. ${c.text}`).join("\n"),
-          `My answer is ${selectedAnswer}.`,
-        ].join("\n\n");
-        const res = await sendMessage(sessionId, questionContext);
-        setAgentMessage(res.message);
-        if (res.weakness_scores) setWeaknessScores(res.weakness_scores);
-        if (res.question && res.question.question_id !== currentQuestion.question_id) {
-          loadQuestion(res.question);
-        }
-        // Re-enable answer selection so the student can try again
-        setSubmitted(false);
-      } finally {
-        setLoading(false);
-      }
+      // Wrong: re-enable selection; HintPanel auto-streams hint 1
+      setAgentMessage("");
+      setSubmitted(false);
     }
   }
 
@@ -128,10 +110,6 @@ export default function App() {
             )}
           </div>
         )}
-        {loading && currentQuestion && !submitted && (
-          <p className="text-sm text-gray-400 animate-pulse px-1">Thinking…</p>
-        )}
-
         {/* Question block */}
         {currentQuestion && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
@@ -149,12 +127,13 @@ export default function App() {
               submitted={submitted}
               onSubmit={handleSubmit}
             />
-            {attempts > 0 && sessionId && (
+            {attempts > 0 && !questionResolved && sessionId && (
               <HintPanel
                 sessionId={sessionId}
                 questionId={currentQuestion.question_id}
                 attemptNumber={Math.min(attempts, 3)}
                 disabled={false}
+                autoTrigger={attempts === 1}
               />
             )}
             {questionResolved && !evalSubmitted && (

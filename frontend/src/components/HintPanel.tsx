@@ -6,9 +6,10 @@ interface Props {
   questionId: string;
   attemptNumber: number;
   disabled: boolean;
+  autoTrigger?: boolean;
 }
 
-export default function HintPanel({ sessionId, questionId, attemptNumber, disabled }: Props) {
+export default function HintPanel({ sessionId, questionId, attemptNumber, disabled, autoTrigger }: Props) {
   const [hints, setHints] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [currentChunk, setCurrentChunk] = useState("");
@@ -20,6 +21,11 @@ export default function HintPanel({ sessionId, questionId, attemptNumber, disabl
     setStreaming(false);
     stopRef.current?.();
   }, [questionId]);
+
+  useEffect(() => {
+    if (autoTrigger) requestHint();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTrigger]);
 
   function requestHint() {
     if (streaming) return;
