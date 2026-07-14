@@ -15,7 +15,7 @@ from pathlib import Path
 
 import anthropic
 
-from src.generator import generate
+from src.generator_gated import generate_gated
 from src.models import Question, QuestionType
 from src.tools import tools
 from src.weakness import WeaknessTracker
@@ -94,7 +94,8 @@ class TutorSession:
 
     def _handle_get_next_question(self, question_type: str | None) -> dict:
         qt = QuestionType(question_type) if question_type else self.weakness.select_type()
-        question = generate(qt)
+        question, winning_score = generate_gated(qt)
+        print(f"[gate] {qt.value} | winner avg={winning_score.average:.2f}")
         self.current_question = question
         return {
             "question_id": question.id,

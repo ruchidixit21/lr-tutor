@@ -110,6 +110,13 @@ export default function App() {
             )}
           </div>
         )}
+        {/* Generating indicator */}
+        {loading && !currentQuestion && (
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <p className="text-sm text-gray-400 animate-pulse">Generating question…</p>
+          </div>
+        )}
+
         {/* Question block */}
         {currentQuestion && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
@@ -146,6 +153,7 @@ export default function App() {
               <button
                 onClick={async () => {
                   setLoading(true);
+                  setCurrentQuestion(null);
                   try {
                     const res = await nextQuestion(sessionId);
                     setAgentMessage("");

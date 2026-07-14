@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.agent import HINT_SYSTEM, TutorSession, build_hint_prompt
 from src.generator import generate
+from src.generator_gated import generate_gated
 from src.models import Question, QuestionType, RubricScore
 from src.retriever import retrieve
 from src.scorer import score
@@ -156,7 +157,8 @@ def next_question(session_id: str) -> SessionResponse:
         raise HTTPException(status_code=404, detail="Session not found")
     qt = session.weakness.select_type()
     try:
-        question = generate(qt)
+        question, winning_score = generate_gated(qt)
+        print(f"[gate] {qt.value} | winner avg={winning_score.average:.2f}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     session.current_question = question
