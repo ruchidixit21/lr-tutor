@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import anthropic
+from langsmith import traceable
 
 from src.generator_gated import generate_gated
 from src.models import Question, QuestionType
@@ -66,6 +67,7 @@ def build_hint_prompt(question: Question, attempt_number: int) -> str:
     return f"{q_summary}\n\nGenerate hint for attempt_number={attempt_number}."
 
 
+@traceable(name="generate_hint")
 def _generate_hint(question: Question, attempt_number: int) -> str:
     """Call claude-sonnet-4-6 to produce a Socratic hint calibrated to attempt_number."""
     response = _get_client().messages.create(
@@ -86,9 +88,8 @@ class TutorSession:
         self.weakness = WeaknessTracker()
         self.current_question: Question | None = None
         self.messages: list[dict] = []
-        # question IDs already recorded by the API's submit-answer endpoint
-        # so the agent's submit_answer tool doesn't double-record
         self._recorded_ids: set[str] = set()
+        self._last_run_id: str | None = None  # LangSmith run ID of the last run_turn call
 
     # ---- tool handlers ----
 
@@ -144,6 +145,7 @@ class TutorSession:
 
     # ---- agent loop ----
 
+    @traceable(name="tutor_run_turn")
     def run_turn(self, user_message: str) -> str:
         """Run one user turn through the Claude tool-use loop.
 
@@ -152,6 +154,14 @@ class TutorSession:
         text response. LangSmith traces each API call as a span when LANGSMITH_API_KEY
         is set.
         """
+        try:
+            from langsmith.run_helpers import get_current_run_tree
+            rt = get_current_run_tree()
+            if rt is not None:
+                self._last_run_id = str(rt.id)
+        except Exception:
+            pass
+
         self.messages.append({"role": "user", "content": user_message})
 
         while True:

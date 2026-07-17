@@ -120,3 +120,74 @@
 - Scorer retry logic added: exponential backoff (2s, 4s) between retries, max 3 attempts.
 
 **Next:** Phase 5 — React frontend, SSE streaming hints, WeaknessHeatmap, human eval UI.
+
+---
+
+## 2026-06-22 to 2026-06-28 — Session 8: Phase 5 React frontend
+
+**Built:**
+- Full Vite + React 18 + TypeScript + Tailwind CSS frontend scaffold (`frontend/`)
+- `frontend/src/api.ts` — typed API client: `createSession`, `sendMessage`, `submitAnswer`, `nextQuestion`, `streamHint`, `submitHumanScore`
+- `Question.tsx` — displays stimulus, stem, 5 radio-button answer choices. Explicit `id`/`htmlFor` pairing (implicit label wrapping caused selection to break in Tailwind).
+- `AnswerSelector.tsx` — submit button, disabled until an answer is selected
+- `HintPanel.tsx` — "Get a hint" button that streams hint text token-by-token via `EventSource`. Three levels: indirect → direct → reveal. Resets on question change via `useEffect([questionId])`.
+- `WeaknessHeatmap.tsx` — 15-type grid, green→red by weakness score, updates after every submission
+- `HumanEvalPanel.tsx` — five 1–5 sliders (one per rubric dimension) + submit; posts to `POST /human-score` which appends to `eval/human_scores.jsonl`
+- `Markdown.tsx` — lightweight inline markdown renderer (bold, bullets, hr) without a library, to handle agent message formatting
+- `App.tsx` — full session flow: start → question → submit → feedback → hint → next question
+- `GET /session/{id}/hint-stream` — SSE endpoint using `client.messages.stream()`; streams hint tokens with `data: {text}\n\n` and terminates with `data: [DONE]\n\n`
+- `POST /human-score` — appends `HumanScoreRequest` to `eval/human_scores.jsonl`
+
+**Architectural decisions:**
+- Answer correctness check is deterministic (`POST /submit-answer`, no LLM). LLM only called on wrong answers for Socratic feedback. This eliminates latency and non-determinism from the answer-check path.
+- All session responses include the current `question` and `weakness_scores` via `_build_response()`, so the frontend never has to parse question text out of agent messages.
+- Wrong-answer Socratic feedback initially routed through the agent (`sendMessage`). This caused the agent to occasionally call `get_next_question` mid-feedback, advancing to a new question unexpectedly. Fixed by removing `sendMessage` from the wrong-answer path entirely and auto-triggering hint 1 via `HintPanel` (`autoTrigger={attempts === 1}`) — the hint endpoint has no tools and cannot advance the question.
+- Session messages reset to `[]` on `/next-question` to prevent cross-question context bleed.
+
+**Issues fixed:**
+- Agent message duplicated question text — fixed by hiding agent message while a fresh question is waiting for first attempt.
+- Radio buttons unselectable — implicit label wrapping conflicted with Tailwind; switched to explicit `htmlFor`/`id` pairing.
+- Answer selection locked after wrong answer — `submitted` stayed `true`; fixed to `setSubmitted(false)` after wrong-answer path.
+- HintPanel auto-triggered on correct answers — `attempts` increments regardless of correctness; fixed by adding `&& !questionResolved` guard on HintPanel render.
+- Same question repeated on "Next question" — agent's `run_turn` returned unchanged `current_question`; fixed with a dedicated `/next-question` endpoint that calls `generate()` directly.
+- Double-recording of attempts — both `/submit-answer` and the agent's `submit_answer` tool could record. Fixed with `_recorded_ids: set[str]` on TutorSession.
+
+---
+
+## 2026-07-08 — Session 9: Naïve baseline comparison (Phase 4 evaluation)
+
+**Built:**
+- `scripts/generate_naive_batch.py` — generates 30 LSAT questions using only the prompt "Write one LSAT logical reasoning question." No RAG, no schema enforcement, no type specification. A second Claude call parses the prose output into the `Question` schema (best-effort). Questions that fail parsing are counted as failures.
+- `scripts/compare_baselines.py` — loads `eval/generated_samples.jsonl` (RAG scores) and `eval/naive_scores.jsonl`, computes mean ± std per dimension, runs two-sample Welch t-tests, prints a table, saves `eval/baseline_comparison.png`.
+- Added `scipy` and `matplotlib` to dependencies.
+
+**Results (n=30 each):**
+
+| Dimension | RAG | Naïve | Δ | p |
+|---|---|---|---|---|
+| logical_validity | 4.53±0.50 | 3.60±0.61 | +0.93 | <0.001 |
+| answer_uniqueness | 4.73±0.44 | 3.67±0.91 | +1.07 | <0.001 |
+| distractor_quality | 3.93±0.44 | 3.03±0.41 | +0.90 | <0.001 |
+| type_accuracy | 5.00±0.00 | 4.30±0.90 | +0.70 | <0.001 |
+| stimulus_independence | 5.00±0.00 | 4.97±0.18 | +0.03 | 0.33 (n.s.) |
+| **AVERAGE** | **4.64±0.22** | **3.91±0.48** | **+0.73** | **<0.001** |
+
+All dimensions significant at p<0.01 except `stimulus_independence` (both conditions near ceiling). The naïve generator also clustered heavily on 4–5 question types (weaken, flaw, assumption_necessary) with no type diversity — a failure mode the RAG system avoids by design.
+
+---
+
+## 2026-07-14 — Session 10: Gated generator in production + parallel candidates + question cache
+
+**Built:**
+- `src/api.py` + `src/agent.py` — replaced `generate()` with `generate_gated()` on all question-serving paths. Every question a student sees is now the best of 5 scored candidates.
+- `src/generator_gated.py` — parallelised candidate generation using `ThreadPoolExecutor(max_workers=5)`. All 5 generate+score pairs run concurrently. Wall-clock time reduced from ~30s (sequential) to ~8s (one API round-trip pair). Used `as_completed()` so results accumulate as they finish; individual failures are caught per-future.
+- `src/question_cache.py` — `QuestionCache` singleton that pre-generates and caches `(Question, RubricScore)` pairs per question type. Target pool size: 3 per type (45 questions in memory). Background daemon thread continuously refills depleted types. `/next-question` pops from the cache instantly; cache miss falls back to synchronous `generate_gated` (~8s). Concurrency limited by `threading.Semaphore(3)` to avoid hammering the Anthropic API.
+- `src/api.py` — lifespan context manager starts the cache on server startup and kicks off `pre_warm()` in a thread pool (non-blocking). Added `GET /cache-status` endpoint showing pool depth per type.
+- `src/db.py` — added `threading.Lock` with double-checked locking around Chroma `PersistentClient` initialisation. Previously, 5 concurrent threads all hitting `get_client()` simultaneously caused `RustBindingsAPI` corruption. Lock ensures only one thread initialises the client; all others wait and reuse it.
+- Frontend loading state: "Generating question…" shown while `currentQuestion` is null and `loading` is true.
+
+**Effective student latency:** ~0ms (cache hit) vs ~8s (cache miss / cold start).
+
+**Issues fixed:**
+- Chroma `PersistentClient` not thread-safe on first initialisation — fixed with double-checked locking in `db.py`.
+- `pre_warm()` blocking the asyncio event loop for ~40s, causing server to appear hung — fixed by removing `await` so it runs in a thread pool without blocking startup.

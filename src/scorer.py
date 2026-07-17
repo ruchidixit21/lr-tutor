@@ -3,6 +3,7 @@ import os
 import time
 
 import anthropic
+from langsmith import traceable
 
 from src.models import Question, RubricScore
 
@@ -51,6 +52,7 @@ Output ONLY valid JSON — no markdown fences, no commentary:
 }"""
 
 
+@traceable(name="score", metadata={"module": "scorer"})
 def score(question: Question, max_retries: int = 3) -> RubricScore:
     """Score a Question on the five rubric dimensions using claude-sonnet-4-6.
 

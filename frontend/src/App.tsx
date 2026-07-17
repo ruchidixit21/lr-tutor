@@ -18,6 +18,8 @@ export default function App() {
   const [evalSubmitted, setEvalSubmitted] = useState(false);
   const [weaknessScores, setWeaknessScores] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
+  const [wrongAnswers, setWrongAnswers] = useState<string[]>([]);
+  const [resolvedAnswer, setResolvedAnswer] = useState<string | null>(null);
 
   async function start() {
     setLoading(true);
@@ -39,6 +41,8 @@ export default function App() {
     setAttempts(0);
     setQuestionResolved(false);
     setEvalSubmitted(false);
+    setWrongAnswers([]);
+    setResolvedAnswer(null);
   }
 
   async function handleSubmit() {
@@ -52,7 +56,7 @@ export default function App() {
     setWeaknessScores(check.weakness_scores);
 
     if (check.correct) {
-      // Correct: show feedback immediately, no LLM needed
+      setResolvedAnswer(selectedAnswer);
       setAgentMessage(
         check.explanation
           ? `Correct. ${check.explanation}`
@@ -60,7 +64,8 @@ export default function App() {
       );
       setQuestionResolved(true);
     } else {
-      // Wrong: re-enable selection; HintPanel auto-streams hint 1
+      // Wrong: mark this choice red, re-enable selection for other choices
+      setWrongAnswers((prev) => [...prev, selectedAnswer]);
       setAgentMessage("");
       setSubmitted(false);
     }
@@ -128,6 +133,8 @@ export default function App() {
               selectedAnswer={selectedAnswer}
               onSelect={setSelectedAnswer}
               submitted={submitted}
+              wrongAnswers={wrongAnswers}
+              resolvedAnswer={resolvedAnswer}
             />
             <AnswerSelector
               selectedAnswer={selectedAnswer}

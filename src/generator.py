@@ -2,6 +2,7 @@ import json
 import os
 
 import anthropic
+from langsmith import traceable
 
 from src.models import Question, QuestionSource, QuestionType
 from src.retriever import retrieve
@@ -117,6 +118,7 @@ Schema:
 }"""
 
 
+@traceable(name="generate", metadata={"module": "generator"})
 def generate(question_type: QuestionType, k: int = 3) -> Question:
     """Generate one LSAT question of the given type using RAG-grounded prompting.
 
@@ -157,16 +159,33 @@ Now write ONE new {q_type_label} question. Requirements:
 - Use a different topic/domain than the examples
 - Set "question_type" to exactly: "{question_type.value}" """
 
-    response = _get_client().messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
+    messages = [{"role": "user", "content": user_prompt}]
+    last_err: Exception | None = None
 
-    raw = response.content[0].text.strip()
-    data = json.loads(raw)
-    # Always enforce the correct snake_case enum value regardless of what the model returned
-    data["question_type"] = question_type.value
-    data["source"] = QuestionSource.GENERATED.value
-    return Question.model_validate(data)
+    for attempt in range(3):
+        response = _get_client().messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        raw = response.content[0].text.strip()
+        # Extract the JSON object in case Claude wraps it in prose or code fences
+        start, end = raw.find("{"), raw.rfind("}")
+        if start != -1 and end != -1:
+            raw = raw[start:end + 1]
+        try:
+            data = json.loads(raw)
+            # Always enforce the correct snake_case enum value
+            data["question_type"] = question_type.value
+            data["source"] = QuestionSource.GENERATED.value
+            return Question.model_validate(data)
+        except (json.JSONDecodeError, Exception) as e:
+            last_err = e
+            # Feed the bad output back so the model can self-correct
+            messages = messages + [
+                {"role": "assistant", "content": response.content[0].text},
+                {"role": "user", "content": "That output was not valid JSON. Return only the JSON object with no trailing commas, comments, or prose."},
+            ]
+
+    raise ValueError(f"generate failed after 3 attempts: {last_err}")

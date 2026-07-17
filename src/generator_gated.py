@@ -10,7 +10,12 @@ This is the core generate→self-critique→select agentic pattern that
 differentiates the system from naive single-shot generation.
 """
 import logging
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
 from src.generator import generate
 from src.models import Question, QuestionType, RubricScore
@@ -24,12 +29,40 @@ _MAX_RETRIES = 2
 
 
 def _generate_and_score(question_type: QuestionType) -> tuple[Question, RubricScore]:
-    """Single unit of work: generate one candidate and score it."""
-    q = generate(question_type)
-    s = score(q)
-    return q, s
+    """Generate one candidate and score it, retrying on 529 overload errors."""
+    import anthropic
+    for attempt in range(4):
+        try:
+            q = generate(question_type)
+            s = score(q)
+            return q, s
+        except anthropic.OverloadedError:
+            if attempt == 3:
+                raise
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            logger.warning("API overloaded, retrying in %ds (attempt %d/4)", wait, attempt + 1)
+            time.sleep(wait)
 
 
+def _log_rubric_feedback(score: RubricScore) -> None:
+    """Attach rubric scores as LangSmith feedback on the current generate_gated run."""
+    if not os.getenv("LANGSMITH_API_KEY"):
+        return
+    try:
+        from langsmith import Client
+        run_tree = get_current_run_tree()
+        if run_tree is None:
+            return
+        client = Client()
+        client.create_feedback(run_tree.id, key="rubric_avg", score=score.average / 5.0)
+        for dim in ("logical_validity", "answer_uniqueness", "distractor_quality",
+                    "type_accuracy", "stimulus_independence"):
+            client.create_feedback(run_tree.id, key=dim, score=getattr(score, dim) / 5.0)
+    except Exception:
+        logger.debug("LangSmith feedback logging failed", exc_info=True)
+
+
+@traceable(name="generate_gated")
 def generate_gated(
     question_type: QuestionType,
     candidates: int = _CANDIDATES,
@@ -97,4 +130,5 @@ def generate_gated(
     if best_question is None or best_score is None:
         raise RuntimeError(f"All generation attempts failed for type {question_type.value}")
 
+    _log_rubric_feedback(best_score)
     return best_question, best_score

@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -209,6 +210,19 @@ def submit_answer(session_id: str, req: SubmitAnswerRequest) -> SubmitAnswerResp
     if q.id not in session._recorded_ids:
         session.weakness.record_attempt(q.question_type, correct)
         session._recorded_ids.add(q.id)
+
+    if session._last_run_id and os.getenv("LANGSMITH_TRACING_V2"):
+        try:
+            from langsmith import Client
+            Client().create_feedback(
+                session._last_run_id,
+                key="answer_correct",
+                score=1.0 if correct else 0.0,
+                value={"answer": req.answer, "question_type": q.question_type.value},
+            )
+        except Exception:
+            pass
+
     return SubmitAnswerResponse(
         correct=correct,
         explanation=q.explanation,

@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 _TARGET_PER_TYPE = 3
 
 # How many types to refill concurrently. Each refill call already uses 5
-# threads internally (generate_gated), so keep this modest to avoid
-# hammering the Anthropic API with too many parallel requests.
-_REFILL_CONCURRENCY = 3
+# threads internally (generate_gated), so keep this at 1 to avoid
+# hammering the Anthropic API: 1 type × 5 candidates × 2 calls = 10 max.
+_REFILL_CONCURRENCY = 1
 
 
 class QuestionCache:
